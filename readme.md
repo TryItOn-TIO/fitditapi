@@ -74,11 +74,14 @@ docker build -t fitdit .
 HOST_PATH=$(pwd)
 
 # Docker 컨테이너를 실행하여 가상 피팅을 수행합니다.
-docker run --gpus all -it --rm \
-  -v "${HOST_PATH}/local_model_dir:/app/local_model_dir" \
-  -v "${HOST_PATH}/images:/app/images" \
-  -v "${HOST_PATH}/results:/app/results" \
-  fitdit-app
+# FitDiT_Project 폴더에서 실행
+docker run -it --rm \
+  -v "$(pwd)/FitDiT:/app" \
+  -v "$(pwd)/models:/models" \
+  -v "$(pwd)/images:/app/images" \
+  -v "$(pwd)/results:/app/results" \
+  -w /app \
+  fitdit-cpu-env python fitdit_module.py
 
 ```
 
