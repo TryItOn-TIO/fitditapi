@@ -1,0 +1,60 @@
+# # AI Models and Data
+# ==================================
+# 가장 중요한 부분입니다. 수십 GB에 달하는 모델 파일과
+# 사용자의 입출력 이미지를 Git이 추적하지 않도록 합니다.
+models/
+local_model_dir/
+images/
+results/
+
+# 만약 images 폴더 안의 특정 예제 파일만 포함하고 싶다면, 아래처럼 예외를 추가하세요.
+# !images/example_model.jpg
+# !images/example_garment.png
+
+
+# # Python Generated Files
+# ==================================
+# Python이 자동으로 생성하는 캐시 및 컴파일된 파일들을 무시합니다.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+
+# # Virtual Environments
+# ==================================
+# 가상환경 폴더는 각 개발자의 로컬 환경에만 필요하므로, 공유하지 않습니다.
+.venv/
+venv/
+ENV/
+env/
+
+
+# # IDE and Editor Configuration
+# ==================================
+# 각자 사용하는 에디터/IDE의 설정 파일이 공유되는 것을 방지합니다.
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+
+# # Operating System Files
+# ==================================
+# macOS, Windows 등 운영체제가 자동으로 생성하는 시스템 파일을 무시합니다.
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+
+# # Log and Secret Files
+# ==================================
+# 로그 파일이나 API 키 같은 민감한 정보가 포함될 수 있는 파일을 제외합니다.
+*.log
+logs/
+.env
+secrets.yml
