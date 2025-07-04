@@ -1,26 +1,37 @@
+# --- Web Framework ---
+fastapi
+uvicorn[standard]
+
+# --- Core AI Frameworks ---
 torch==2.4.0
 torchvision==0.19.0
-accelerate==0.31.0
+
+# --- Hugging Face Ecosystem ---
 diffusers==0.31.0
 transformers==4.39.3
-gradio==5.8.0
-numpy==1.23.0
-scikit-image==0.24.0
 huggingface_hub==0.26.5
+accelerate==0.31.0
+
+# --- Preprocessing & Image Handling ---
+numpy==1.23.0
+opencv-python
+scikit-image==0.24.0
+einops==0.7.0
+Pillow
+
+# --- ONNX Runtime ---
 onnxruntime-gpu==1.18.1
 onnx
-opencv-python
+
+# --- AWS S3 관련 ---
+boto3
+
+# --- Configuration ---
+pydantic-settings
+
+# --- Visualization & UI ---
 matplotlib==3.8.3
-einops==0.7.0
+gradio==5.8.0
+
+# --- Optional (파일 업로드 최적화 또는 개발 환경 도구) ---
 hf-transfer
-
-
-# FastAPI 웹 프레임워크
-fastapi==0.111.0
-
-# ASGI 서버 (FastAPI 실행용)
-# [standard]는 성능 향상을 위한 추가 라이브러리(uvloop, httptools 등)를 함께 설치합니다.
-uvicorn[standard]==0.29.0
-
-# 데이터 유효성 검사 및 설정 관리 라이브러리 (FastAPI의 핵심 의존성)
-pydantic==2.7.1
