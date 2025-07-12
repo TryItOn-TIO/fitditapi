@@ -1,8 +1,10 @@
+# application.py
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from datetime import datetime
 import os
-import asyncio  # asyncio 라이브러리를 임포트합니다.
+import asyncio
 import traceback
 
 from schemas import AvatarCreateRequest, AvatarCreateResponse, AvatarTryOnRequest, AvatarTryOnResponse
@@ -10,7 +12,7 @@ from config import settings
 import s3_handler
 import vton_service
 
-# --- FastAPI 애플리케이션 생성 ---
+# ... (FastAPI 앱 생성, startup 이벤트 핸들러는 그대로 유지) ...
 app = FastAPI(
     title="가상 피팅(Virtual Try-On) API",
     description="FitDiT 모델을 사용하여 상/하의 가상 피팅을 수행합니다.",
@@ -44,22 +46,30 @@ def read_root():
 async def generate_images(request: AvatarCreateRequest):
     print(f"✅ /generate 요청 수신: userId={request.userId}, url={request.tryOnImgUrl}")
     try:
-        # 1. S3에서 원본 이미지 비동기 다운로드 (await 사용)
+        # 1. S3에서 원본 이미지 다운로드
         model_image = await s3_handler.download_image_from_s3(str(request.tryOnImgUrl))
 
-        # 2. 무거운 AI 작업을 별도 스레드에서 실행 (asyncio.to_thread 사용)
-        print("⏳ Mask/Pose 생성 중... (별도 스레드에서 처리)")
-        upper_mask, pose_image = await asyncio.to_thread(vton_service.create_mask_and_pose, model_image, "Upper-body")
-        lower_mask, _ = await asyncio.to_thread(vton_service.create_mask_and_pose, model_image, "Lower-body")
+        # 2. 포즈 생성 (무거운 작업) -> 1번만 실행
+        print("⏳ Pose 데이터를 생성합니다... (1번만 실행)")
+        pose_image, candidate, vton_img_det = await asyncio.to_thread(vton_service.create_pose_data, model_image)
 
-        # 3. 생성된 이미지들을 S3에 병렬로 업로드 (asyncio.gather 사용)
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        base_key = f"users/{request.userId}/{timestamp}"
+        # 3. 상의/하의 마스크를 병렬로 생성
+        print("⏳ 상의/하의 Mask를 병렬로 생성합니다...")
+        mask_tasks = [
+            asyncio.to_thread(vton_service.create_mask_only, model_image, vton_img_det, candidate, "Upper-body"),
+            asyncio.to_thread(vton_service.create_mask_only, model_image, vton_img_det, candidate, "Lower-body")
+        ]
+        upper_mask, lower_mask = await asyncio.gather(*mask_tasks)
+        print("✅ 모든 마스크 병렬 생성 완료.")
+
+        # 4. 생성된 모든 이미지를 S3에 병렬로 업로드
+        # timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        base_key = f"users/{request.userId}/"
         
         upload_tasks = [
-            s3_handler.upload_pil_image_to_s3(pose_image, f"{base_key}_pose.png"),
-            s3_handler.upload_pil_image_to_s3(upper_mask, f"{base_key}_upper_mask.png"),
-            s3_handler.upload_pil_image_to_s3(lower_mask, f"{base_key}_lower_mask.png")
+            s3_handler.upload_pil_image_to_s3(pose_image, f"{base_key}pose.png"),
+            s3_handler.upload_pil_image_to_s3(upper_mask, f"{base_key}upper_mask.png"),
+            s3_handler.upload_pil_image_to_s3(lower_mask, f"{base_key}lower_mask.png")
         ]
         pose_url, upper_mask_url, lower_mask_url = await asyncio.gather(*upload_tasks)
 
@@ -76,6 +86,7 @@ async def generate_images(request: AvatarCreateRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred during mask generation: {e}")
 
+# ... (/tryon 엔드포인트는 이전과 동일하게 유지) ...
 @app.post(
     "/tryon",
     response_model=AvatarTryOnResponse,
@@ -119,6 +130,5 @@ async def try_on_avatar(request: AvatarTryOnRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred during try-on: {e}")
 
-# --- 서버 실행 (로컬 테스트용) ---
 if __name__ == "__main__":
     uvicorn.run("application:app", host="0.0.0.0", port=8000, reload=True)

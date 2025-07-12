@@ -1,7 +1,5 @@
-"""
-FitDiT 모델을 사용하여 가상 피팅(Virtual Try-on)을 수행하는 메인 스크립트.
-FastAPI 서비스에 맞게 수정된 버전.
-"""
+# vton_service.py
+
 import os
 import torch
 import numpy as np
@@ -10,7 +8,6 @@ import math
 import random
 from typing import Tuple
 
-# 소스 코드가 마운트된 /app 폴더를 기준으로 모듈 임포트
 from preprocess.humanparsing.run_parsing import Parsing
 from preprocess.dwpose import DWposeDetector
 from transformers import CLIPVisionModelWithProjection
@@ -21,7 +18,8 @@ from src.transformer_sd3_garm import SD3Transformer2DModel as SD3Transformer2DMo
 from src.transformer_sd3_vton import SD3Transformer2DModel as SD3Transformer2DModel_Vton
 from config import settings
 
-# --- 모델 클래스 및 헬퍼 함수 (기존 코드와 거의 동일) ---
+# ... (FitDiTGenerator 클래스와 _pad_and_resize 등 다른 헬퍼 함수는 그대로 유지) ...
+# FitDiTGenerator, _pad_and_resize, _unpad_and_resize, _resize_image
 
 class FitDiTGenerator:
     """FitDiT 모델과 관련 프로세서를 초기화하고 관리하는 클래스"""
@@ -65,7 +63,6 @@ class FitDiTGenerator:
 
 # --- 헬퍼 함수들 ---
 def _pad_and_resize(im, new_width, new_height, pad_color=(255, 255, 255), mode=Image.LANCZOS):
-    # ... (기존 코드와 동일)
     old_width, old_height = im.size
     ratio = min(new_width / old_width, new_height / old_height)
     new_size = (round(old_width * ratio), round(old_height * ratio))
@@ -77,7 +74,6 @@ def _pad_and_resize(im, new_width, new_height, pad_color=(255, 255, 255), mode=I
     return new_im, pad_w, pad_h
 
 def _unpad_and_resize(padded_im, pad_w, pad_h, original_width, original_height):
-    # ... (기존 코드와 동일)
     width, height = padded_im.size
     left, top = pad_w, pad_h
     right, bottom = width - pad_w, height - pad_h
@@ -86,35 +82,41 @@ def _unpad_and_resize(padded_im, pad_w, pad_h, original_width, original_height):
     return resized_im
 
 def _resize_image(img, target_size=768):
-    # ... (기존 코드와 동일)
     width, height = img.size
     scale = target_size / min(width, height)
     new_width, new_height = int(round(width * scale)), int(round(height * scale))
     return img.resize((new_width, new_height), Image.LANCZOS)
 
-# --- 핵심 기능 함수 (FastAPI 서비스에 맞게 수정) ---
-
-# 모델 인스턴스를 전역으로 관리 (main.py에서 초기화)
+# --- 핵심 기능 함수 ---
 generator: FitDiTGenerator = None
 
-def create_mask_and_pose(vton_img: Image.Image, category: str) -> Tuple[Image.Image, Image.Image]:
-    """모델 이미지에 대한 마스크와 포즈를 생성하고 PIL Image 객체로 반환합니다."""
+def create_pose_data(vton_img: Image.Image) -> Tuple[Image.Image, np.ndarray, Image.Image]:
+    """포즈 이미지와 마스크 생성에 필요한 'candidate' 및 리사이즈된 이미지를 생성합니다."""
     global generator
     if generator is None:
         raise RuntimeError("Model is not initialized.")
 
-    print(f"Creating mask and pose for category: {category}...")
-    
+    print("Creating pose data...")
     with torch.inference_mode():
         vton_img_det = _resize_image(vton_img)
-        pose_image_np, keypoints, _, candidate = generator.dwprocessor(np.array(vton_img_det)[:, :, ::-1])
+        pose_image_np, _, _, candidate = generator.dwprocessor(np.array(vton_img_det)[:, :, ::-1])
         candidate = candidate[0]
         candidate[:, 0] *= vton_img_det.width
         candidate[:, 1] *= vton_img_det.height
-
         pose_image = Image.fromarray(pose_image_np[:, :, ::-1])
-        model_parse, _ = generator.parsing_model(vton_img_det)
 
+    print("Pose data creation complete.")
+    return pose_image, candidate, vton_img_det
+
+def create_mask_only(vton_img: Image.Image, vton_img_det: Image.Image, candidate: np.ndarray, category: str) -> Image.Image:
+    """미리 생성된 데이터를 사용하여 특정 카테고리의 마스크만 생성합니다."""
+    global generator
+    if generator is None:
+        raise RuntimeError("Model is not initialized.")
+
+    print(f"Creating mask for category: {category}...")
+    with torch.inference_mode():
+        model_parse, _ = generator.parsing_model(vton_img_det)
         mask, _ = get_mask_location(
             category, model_parse, candidate,
             model_parse.width, model_parse.height,
@@ -122,22 +124,16 @@ def create_mask_and_pose(vton_img: Image.Image, category: str) -> Tuple[Image.Im
         )
         mask = mask.resize(vton_img.size, Image.NEAREST).convert("L")
 
-    print("Mask and pose creation complete.")
-    return mask, pose_image
+    print(f"Mask creation for {category} complete.")
+    return mask
 
-def perform_try_on(
-    base_image: Image.Image, 
-    garment_image: Image.Image, 
-    mask_image: Image.Image, 
-    pose_image: Image.Image
-) -> Image.Image:
+def perform_try_on(base_image: Image.Image, garment_image: Image.Image, mask_image: Image.Image, pose_image: Image.Image) -> Image.Image:
     """주어진 이미지들을 사용하여 가상 피팅을 수행하고 결과 이미지를 반환합니다."""
     global generator
     if generator is None:
         raise RuntimeError("Model is not initialized.")
 
     print("Performing virtual try-on...")
-    
     new_width, new_height = map(int, settings.TRYON_RESOLUTION.split("x"))
     
     with torch.inference_mode():
@@ -171,3 +167,15 @@ def perform_try_on(
     
     print("Virtual try-on complete.")
     return final_image
+    # """주어진 이미지들을 사용하여 가상 피팅을 수행하고 결과 이미지를 반환합니다."""
+    # print("Performing virtual try-on... (DEBUG MODE: SKIPPING HEAVY AI TASK)")
+
+    # # --- 실제 AI 모델 실행 부분을 주석 처리 ---
+    # # ( ... 기존 generator.pipeline(...) 관련 코드 전체 ... )
+    
+    # # AI 작업 대신, 입력받은 베이스 이미지를 그대로 결과인 것처럼 반환합니다.
+    # # 이렇게 하면 AI 연산 부하 없이 코드의 전체 흐름만 테스트할 수 있습니다.
+    # import time
+    # time.sleep(5) # 실제 작업이 걸리는 것처럼 5초간 대기
+    # print("Virtual try-on complete. (DEBUG MODE)")
+    # return base_image 
