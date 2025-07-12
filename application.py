@@ -2,11 +2,13 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from datetime import datetime
 import os
+import asyncio  # asyncio 라이브러리를 임포트합니다.
+import traceback
 
-from .schemas import AvatarCreateRequest, AvatarCreateResponse, AvatarTryOnRequest, AvatarTryOnResponse
-from .config import settings
-from . import s3_handler
-from . import vton_service
+from schemas import AvatarCreateRequest, AvatarCreateResponse, AvatarTryOnRequest, AvatarTryOnResponse
+from config import settings
+import s3_handler
+import vton_service
 
 # --- FastAPI 애플리케이션 생성 ---
 app = FastAPI(
@@ -26,7 +28,6 @@ def startup_event():
         print("✅ Model loaded successfully!")
     except Exception as e:
         print(f"❌ Failed to load model: {e}")
-        # 실제 프로덕션에서는 서버를 종료하거나 에러 상태로 전환해야 합니다.
         raise RuntimeError("ML model could not be loaded!")
 
 # --- API 엔드포인트 ---
@@ -43,29 +44,24 @@ def read_root():
 async def generate_images(request: AvatarCreateRequest):
     print(f"✅ /generate 요청 수신: userId={request.userId}, url={request.tryOnImgUrl}")
     try:
-        # 1. S3에서 원본 이미지 다운로드
-        model_image = s3_handler.download_image_from_s3(str(request.tryOnImgUrl))
+        # 1. S3에서 원본 이미지 비동기 다운로드 (await 사용)
+        model_image = await s3_handler.download_image_from_s3(str(request.tryOnImgUrl))
 
-        # 2. 상의 마스크 및 포즈 생성
-        # 포즈는 한 번만 생성하면 되므로 상의 마스크 생성 시 함께 얻습니다.
-        upper_mask, pose_image = vton_service.create_mask_and_pose(model_image, "Upper-body")
+        # 2. 무거운 AI 작업을 별도 스레드에서 실행 (asyncio.to_thread 사용)
+        print("⏳ Mask/Pose 생성 중... (별도 스레드에서 처리)")
+        upper_mask, pose_image = await asyncio.to_thread(vton_service.create_mask_and_pose, model_image, "Upper-body")
+        lower_mask, _ = await asyncio.to_thread(vton_service.create_mask_and_pose, model_image, "Lower-body")
 
-        # 3. 하의 마스크 생성 (동일한 모델 이미지 사용)
-        lower_mask, _ = vton_service.create_mask_and_pose(model_image, "Lower-body")
-
-        # 4. 생성된 이미지들을 S3에 업로드
+        # 3. 생성된 이미지들을 S3에 병렬로 업로드 (asyncio.gather 사용)
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        
-        # S3 키 생성
         base_key = f"users/{request.userId}/{timestamp}"
-        pose_key = f"{base_key}_pose.png"
-        upper_mask_key = f"{base_key}_upper_mask.png"
-        lower_mask_key = f"{base_key}_lower_mask.png"
         
-        # S3 업로드 실행
-        pose_url = s3_handler.upload_pil_image_to_s3(pose_image, pose_key)
-        upper_mask_url = s3_handler.upload_pil_image_to_s3(upper_mask, upper_mask_key)
-        lower_mask_url = s3_handler.upload_pil_image_to_s3(lower_mask, lower_mask_key)
+        upload_tasks = [
+            s3_handler.upload_pil_image_to_s3(pose_image, f"{base_key}_pose.png"),
+            s3_handler.upload_pil_image_to_s3(upper_mask, f"{base_key}_upper_mask.png"),
+            s3_handler.upload_pil_image_to_s3(lower_mask, f"{base_key}_lower_mask.png")
+        ]
+        pose_url, upper_mask_url, lower_mask_url = await asyncio.gather(*upload_tasks)
 
         print("✅ 마스크 및 포즈 생성/업로드 완료.")
         return AvatarCreateResponse(
@@ -77,8 +73,8 @@ async def generate_images(request: AvatarCreateRequest):
 
     except Exception as e:
         print(f"❌ /generate 오류: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred during mask generation: {e}")
-
 
 @app.post(
     "/tryon",
@@ -89,35 +85,40 @@ async def generate_images(request: AvatarCreateRequest):
 async def try_on_avatar(request: AvatarTryOnRequest):
     print(f"✅ /tryon 요청 수신: userId={request.userId}")
     try:
-        # 1. S3에서 필요한 모든 이미지 다운로드
-        print("⏳ 필요한 이미지들을 S3에서 다운로드 중...")
-        base_image = s3_handler.download_image_from_s3(str(request.baseImgUrl))
-        garment_image = s3_handler.download_image_from_s3(str(request.garmentImgUrl))
-        mask_image = s3_handler.download_image_from_s3(str(request.maskImgUrl))
-        pose_image = s3_handler.download_image_from_s3(str(request.poseImgUrl))
-        print("✅ 이미지 다운로드 완료.")
+        # 1. S3에서 필요한 모든 이미지를 병렬로 다운로드 (asyncio.gather 사용)
+        print("⏳ 필요한 이미지들을 병렬로 다운로드 중...")
+        download_tasks = [
+            s3_handler.download_image_from_s3(str(request.baseImgUrl)),
+            s3_handler.download_image_from_s3(str(request.garmentImgUrl)),
+            s3_handler.download_image_from_s3(str(request.maskImgUrl)),
+            s3_handler.download_image_from_s3(str(request.poseImgUrl))
+        ]
+        base_image, garment_image, mask_image, pose_image = await asyncio.gather(*download_tasks)
+        print("✅ 모든 이미지 다운로드 완료.")
 
-        # 2. 가상 피팅 수행
-        result_image = vton_service.perform_try_on(
+        # 2. 무거운 AI 작업을 별도 스레드에서 실행 (asyncio.to_thread 사용)
+        print("⏳ Try-On 모델 실행 중... (별도 스레드에서 처리)")
+        result_image = await asyncio.to_thread(
+            vton_service.perform_try_on,
             base_image=base_image,
             garment_image=garment_image,
             mask_image=mask_image,
             pose_image=pose_image
         )
 
-        # 3. 결과 이미지를 S3에 업로드
+        # 3. 결과 이미지를 S3에 비동기 업로드 (await 사용)
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         result_key = f"results/{request.userId}/tryon_{timestamp}.png"
-        result_url = s3_handler.upload_pil_image_to_s3(result_image, result_key)
+        result_url = await s3_handler.upload_pil_image_to_s3(result_image, result_key)
         
         print("✅ Try-On 이미지 생성/업로드 완료.")
         return AvatarTryOnResponse(tryOnImgUrl=result_url)
 
     except Exception as e:
         print(f"❌ /tryon 오류: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred during try-on: {e}")
 
 # --- 서버 실행 (로컬 테스트용) ---
 if __name__ == "__main__":
-    # Docker 환경에서는 이 부분이 직접 실행되지 않고, CMD 명령어가 uvicorn을 실행합니다.
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("application:app", host="0.0.0.0", port=8000, reload=True)

@@ -11,15 +11,15 @@ import random
 from typing import Tuple
 
 # 소스 코드가 마운트된 /app 폴더를 기준으로 모듈 임포트
-from .preprocess.humanparsing.run_parsing import Parsing
-from .preprocess.dwpose import DWposeDetector
+from preprocess.humanparsing.run_parsing import Parsing
+from preprocess.dwpose import DWposeDetector
 from transformers import CLIPVisionModelWithProjection
-from .src.pose_guider import PoseGuider
-from .src.utils_mask import get_mask_location
-from .src.pipeline_stable_diffusion_3_tryon import StableDiffusion3TryOnPipeline
-from .src.transformer_sd3_garm import SD3Transformer2DModel as SD3Transformer2DModel_Garm
-from .src.transformer_sd3_vton import SD3Transformer2DModel as SD3Transformer2DModel_Vton
-from .config import settings
+from src.pose_guider import PoseGuider
+from src.utils_mask import get_mask_location
+from src.pipeline_stable_diffusion_3_tryon import StableDiffusion3TryOnPipeline
+from src.transformer_sd3_garm import SD3Transformer2DModel as SD3Transformer2DModel_Garm
+from src.transformer_sd3_vton import SD3Transformer2DModel as SD3Transformer2DModel_Vton
+from config import settings
 
 # --- 모델 클래스 및 헬퍼 함수 (기존 코드와 거의 동일) ---
 
