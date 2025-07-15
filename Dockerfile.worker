@@ -1,0 +1,43 @@
+# Dockerfile.worker (디버깅 및 최종 해결 버전)
+
+# NVIDIA 공식 이미지를 사용하여 안정성과 호환성을 확보합니다.
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+# 작업 디렉토리 설정
+WORKDIR /app
+
+# 시스템 패키지 설치 시 대화형 프롬프트가 뜨지 않도록 설정
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 시스템 의존성 및 Python 설치
+RUN apt-get update && apt-get install -y \
+    git wget curl ffmpeg libgl1-mesa-glx \
+    python3.10 python3-pip python3.10-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# python3.10을 python으로 링크하여 기본 명령어로 사용
+RUN ln -s /usr/bin/python3.10 /usr/bin/python
+RUN python -m pip install --upgrade pip
+
+# requirements.txt를 먼저 복사하여 Docker 이미지 빌드 캐시를 효율적으로 활용
+COPY worker_requirements.txt .
+# Python 의존성 설치
+RUN pip install --no-cache-dir -r worker_requirements.txt
+
+# --- 👇 여기가 핵심 디버깅 단계입니다 👇 ---
+# pip install 후, 시스템 전체에서 'celery' 실행 파일을 찾아 그 경로를 출력합니다.
+# 이 경로를 복사하여 아래 CMD에 붙여넣어야 합니다.
+RUN find / -type f -name "celery"
+
+# 나머지 모든 소스 코드를 복사
+COPY . .
+
+# 위 'find' 명령으로 찾은 'celery'의 절대 경로를 여기에 입력해주세요.
+# 예: /usr/local/bin/celery 또는 /root/.local/bin/celery 등
+#CMD ["/usr/local/bin/celery", "-A", "tasks.celery_app", "worker", "-l", "info", "--concurrency=1"]
+# --- 👇 여기가 가장 중요한 수정 부분입니다 👇 ---
+# NVIDIA의 기본 Entrypoint를 무시하고,
+# 컨테이너가 종료되지 않고 계속 실행되도록 설정합니다.
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["tail -f /dev/null"]

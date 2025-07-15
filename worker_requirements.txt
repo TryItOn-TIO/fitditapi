@@ -1,0 +1,40 @@
+# --- Web Framework ---
+fastapi
+uvicorn[standard]
+
+# --- Core AI Frameworks ---
+torch==2.4.0
+torchvision==0.19.0
+
+# --- Hugging Face Ecosystem ---
+diffusers==0.31.0
+transformers==4.39.3
+huggingface_hub==0.26.5
+accelerate==0.31.0
+
+# --- Preprocessing & Image Handling ---
+numpy==1.23.0
+opencv-python
+scikit-image==0.24.0
+einops==0.7.0
+Pillow
+
+# --- ONNX Runtime ---
+onnxruntime-gpu==1.18.1
+onnx
+
+# --- AWS S3 관련 ---
+boto3
+
+# --- Configuration ---
+pydantic-settings
+
+# --- Visualization & UI ---
+matplotlib==3.8.3
+gradio==5.8.0
+
+# --- Optional (파일 업로드 최적화 또는 개발 환경 도구) ---
+hf-transfer
+
+celery==5.4.0
+redis==5.0.4
